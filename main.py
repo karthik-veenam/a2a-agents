@@ -624,7 +624,9 @@ CONFIG_HTML = """
                 </div>
                 <div class="field">
                     <label>Model</label>
-                    <input type="text" name="llm_model" value="{llm_model}">
+                    <select name="llm_model" id="model-select">
+                        <option value="">Select a model</option>
+                    </select>
                 </div>
             </div>
 
@@ -657,8 +659,30 @@ CONFIG_HTML = """
                 document.querySelectorAll('.provider-option').forEach(x => x.classList.remove('selected'));
                 o.classList.add('selected');
                 o.querySelector('input').checked = true;
+                updateModels(o.querySelector('input').value);
             }});
         }});
+
+        const models = {{
+            anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"],
+            openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+            google: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"]
+        }};
+        const currentModel = "{llm_model}";
+        const currentProvider = document.querySelector('.provider-option.selected input')?.value || "anthropic";
+
+        function updateModels(provider) {{
+            const sel = document.getElementById('model-select');
+            sel.innerHTML = '';
+            (models[provider] || []).forEach(m => {{
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                if (m === currentModel) opt.selected = true;
+                sel.appendChild(opt);
+            }});
+        }}
+        updateModels(currentProvider);
         const p = new URLSearchParams(location.search);
         if (p.get('saved')) showToast('Configuration saved!', 'success');
 
