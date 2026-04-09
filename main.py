@@ -66,7 +66,21 @@ async def check_api_key(request: Request, call_next):
     if request.url.path in ("/.well-known/agent.json", "/health"):
         return await call_next(request)
 
-    api_key = request.headers.get("x-api-key")
+    # Debug logging
+    print(f"[DEBUG] Path: {request.url.path}")
+    print(f"[DEBUG] Method: {request.method}")
+    print(f"[DEBUG] Headers: {dict(request.headers)}")
+
+    # Accept API key from multiple header formats
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("authorization", "").replace("Bearer ", "").replace("bearer ", "")
+        or request.headers.get("api-key")
+        or request.headers.get("apikey")
+    )
+
+    print(f"[DEBUG] Extracted API key: '{api_key}', Expected: '{API_KEY}'")
+
     if api_key != API_KEY:
         return JSONResponse(
             status_code=401,
