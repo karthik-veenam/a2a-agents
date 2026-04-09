@@ -155,8 +155,8 @@ class LLMAgentExecutor(AgentExecutor):
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
 
         # Signal task submitted and working
-        updater.submit()
-        updater.start_work()
+        await updater.submit()
+        await updater.start_work()
 
         # Extract user message text
         user_text = ""
@@ -178,10 +178,10 @@ class LLMAgentExecutor(AgentExecutor):
         clean_result, task_state = parse_status(raw_result)
 
         # Add artifact
-        updater.add_artifact([TextPart(text=clean_result)], name="response")
+        await updater.add_artifact([TextPart(text=clean_result)], name="response")
 
         # Set final status
-        updater.update_status(
+        await updater.update_status(
             task_state,
             message=updater.new_agent_message(parts=[TextPart(text=clean_result)]),
         )
