@@ -155,6 +155,12 @@ async def ask_claude(user_message: str) -> str:
     )
 
 
+# ─── Root endpoint (ServiceNow Agent Studio sends here) ───
+@app.post("/")
+async def root_handler(request: Request):
+    return await _process_a2a_request(request)
+
+
 # ─── A2A Task Handler ───
 @app.post("/tasks/send")
 async def handle_task(request: Request):
@@ -187,7 +193,7 @@ async def _process_a2a_request(request: Request):
         message = params.get("message", {})
         parts = message.get("parts", [])
         for part in parts:
-            if part.get("type") == "text":
+            if part.get("type") == "text" or "text" in part:
                 user_text += part.get("text", "")
 
     # Format 2: Direct message format
