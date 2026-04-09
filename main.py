@@ -541,11 +541,13 @@ async def _process_a2a_request(request: Request):
 
     user_text = ""
     task_id = str(uuid.uuid4())
+    context_id = str(uuid.uuid4())
     rpc_id = body.get("id", "1")
 
     if body.get("params"):
         params = body["params"]
         task_id = params.get("id", task_id)
+        context_id = params.get("contextId", context_id)
         message = params.get("message", {})
         for part in message.get("parts", []):
             if "text" in part:
@@ -594,6 +596,7 @@ async def _process_a2a_request(request: Request):
         "id": rpc_id,
         "result": {
             "id": task_id,
+            "contextId": context_id,
             "status": {"state": status},
             "artifacts": [{"parts": [{"type": "text", "text": clean_response}]}],
         },
@@ -611,5 +614,5 @@ async def health():
     }
 
 
-def _error_response(rpc_id, task_id, message):
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": {"id": task_id, "status": {"state": "failed", "message": {"role": "agent", "parts": [{"type": "text", "text": message}]}}}}
+def _error_response(rpc_id, task_id, message, context_id=None):
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": {"id": task_id, "contextId": context_id or str(uuid.uuid4()), "status": {"state": "failed", "message": {"role": "agent", "parts": [{"type": "text", "text": message}]}}}}
