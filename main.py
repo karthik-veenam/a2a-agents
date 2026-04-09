@@ -42,7 +42,7 @@ PROVIDERS = {
     },
     "google": {
         "name": "Google (Gemini)",
-        "models": ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"],
+        "models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"],
     },
 }
 
@@ -666,7 +666,7 @@ CONFIG_HTML = """
         const models = {{
             anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"],
             openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-            google: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"]
+            google: ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"]
         }};
         const currentModel = "{llm_model}";
         const currentProvider = document.querySelector('.provider-option.selected input')?.value || "anthropic";
@@ -862,10 +862,13 @@ async def call_llm(user_message: str) -> str:
             return data["choices"][0]["message"]["content"]
 
         elif provider == "google":
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             resp = await client.post(
                 url,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": api_key,
+                },
                 json={
                     "system_instruction": {"parts": [{"text": system}]},
                     "contents": [{"parts": [{"text": user_message}]}],
