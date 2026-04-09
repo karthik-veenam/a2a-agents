@@ -59,6 +59,10 @@ Be concise, professional, and actionable. If the issue description is vague, sti
 # ─── Middleware: API Key check (skip for agent card and health) ───
 @app.middleware("http")
 async def check_api_key(request: Request, call_next):
+    # Let CORS preflight through
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     if request.url.path in ("/.well-known/agent.json", "/health"):
         return await call_next(request)
 
