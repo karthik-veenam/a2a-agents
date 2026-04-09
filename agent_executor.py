@@ -4,17 +4,12 @@ import httpx
 from typing_extensions import override
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import (
-    TaskState,
-    TaskStatus,
-    TaskStatusUpdateEvent,
-    TaskArtifactUpdateEvent,
-)
-from a2a.utils import new_agent_text_message, new_task, new_text_artifact
+from a2a.server.tasks import TaskUpdater
+from a2a.types import TaskState, TextPart
 
 
 # ═══════════════════════════════════════════════════════════════
-# STATUS SIGNALING PROMPT
+# STATUS SIGNALING
 # ═══════════════════════════════════════════════════════════════
 
 STATUS_INSTRUCTION = """
@@ -67,7 +62,6 @@ class LLMAgent:
             "SYSTEM_PROMPT",
             "You are a helpful AI assistant. Be concise, accurate, and helpful.",
         )
-        # Conversation history per context_id
         self.conversations: dict[str, list[dict]] = {}
 
     def _get_system(self) -> str:
@@ -77,11 +71,9 @@ class LLMAgent:
         if not self.api_key:
             return "Agent not configured. Please visit /config to set up your LLM provider.\n\n[STATUS:input-required]"
 
-        # Build conversation history
         if context_id not in self.conversations:
             self.conversations[context_id] = []
         self.conversations[context_id].append({"role": "user", "content": user_message})
-
         messages = self.conversations[context_id]
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -94,11 +86,9 @@ class LLMAgent:
             else:
                 result = "Unknown provider.\n\n[STATUS:completed]"
 
-        # Store assistant response in history
         clean_result, _ = parse_status(result)
         self.conversations[context_id].append({"role": "assistant", "content": clean_result})
 
-        # Cleanup: remove completed conversations, cap at 100
         if len(self.conversations) > 100:
             oldest = next(iter(self.conversations))
             del self.conversations[oldest]
@@ -106,23 +96,13 @@ class LLMAgent:
         return result
 
     def cleanup_context(self, context_id: str):
-        """Remove conversation history for a completed context."""
         self.conversations.pop(context_id, None)
 
     async def _call_anthropic(self, client: httpx.AsyncClient, messages: list[dict]) -> str:
         resp = await client.post(
             "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "max_tokens": 4096,
-                "system": self._get_system(),
-                "messages": messages,
-            },
+            headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": self.model, "max_tokens": 4096, "system": self._get_system(), "messages": messages},
         )
         if resp.status_code != 200:
             return f"Anthropic API error: {resp.status_code}\n\n[STATUS:completed]"
@@ -133,15 +113,8 @@ class LLMAgent:
         oai_messages = [{"role": "system", "content": self._get_system()}] + messages
         resp = await client.post(
             "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "max_tokens": 4096,
-                "messages": oai_messages,
-            },
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={"model": self.model, "max_tokens": 4096, "messages": oai_messages},
         )
         if resp.status_code != 200:
             return f"OpenAI API error: {resp.status_code}\n\n[STATUS:completed]"
@@ -153,17 +126,10 @@ class LLMAgent:
             {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
             for m in messages
         ]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         resp = await client.post(
-            url,
-            headers={
-                "Content-Type": "application/json",
-                "x-goog-api-key": self.api_key,
-            },
-            json={
-                "system_instruction": {"parts": [{"text": self._get_system()}]},
-                "contents": gemini_contents,
-            },
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+            json={"system_instruction": {"parts": [{"text": self._get_system()}]}, "contents": gemini_contents},
         )
         if resp.status_code != 200:
             return f"Google API error: {resp.status_code}\n\n[STATUS:completed]"
@@ -172,7 +138,7 @@ class LLMAgent:
 
 
 # ═══════════════════════════════════════════════════════════════
-# A2A AGENT EXECUTOR
+# A2A AGENT EXECUTOR (using TaskUpdater)
 # ═══════════════════════════════════════════════════════════════
 
 class LLMAgentExecutor(AgentExecutor):
@@ -185,6 +151,13 @@ class LLMAgentExecutor(AgentExecutor):
     async def execute(
         self, context: RequestContext, event_queue: EventQueue
     ) -> None:
+        # Use TaskUpdater — handles taskId, contextId, events automatically
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+
+        # Signal task submitted and working
+        updater.submit()
+        updater.start_work()
+
         # Extract user message text
         user_text = ""
         if context.message and context.message.parts:
@@ -197,53 +170,25 @@ class LLMAgentExecutor(AgentExecutor):
         if not user_text:
             user_text = "Hello"
 
-        # Create or reuse task
-        task = context.current_task or new_task(context.message)
-        await event_queue.enqueue_event(task)
-
-        # Signal working
-        await event_queue.enqueue_event(
-            TaskStatusUpdateEvent(
-                taskId=task.id,
-                contextId=task.contextId,
-                status=TaskStatus(
-                    state=TaskState.working,
-                    message=new_agent_text_message("Thinking..."),
-                ),
-            )
-        )
-
         # Call LLM with conversation history
-        context_id = task.contextId or task.id
-        raw_result = await self.agent.invoke(user_text, context_id)
+        ctx_id = context.context_id or context.task_id
+        raw_result = await self.agent.invoke(user_text, ctx_id)
 
-        # Parse status signal from LLM response
+        # Parse status signal
         clean_result, task_state = parse_status(raw_result)
 
-        # Send artifact
-        await event_queue.enqueue_event(
-            TaskArtifactUpdateEvent(
-                taskId=task.id,
-                contextId=task.contextId,
-                artifact=new_text_artifact(name="response", text=clean_result),
-            )
+        # Add artifact
+        updater.add_artifact([TextPart(text=clean_result)], name="response")
+
+        # Set final status
+        updater.update_status(
+            task_state,
+            message=updater.new_agent_message(parts=[TextPart(text=clean_result)]),
         )
 
-        # Send final status (completed or input-required)
-        await event_queue.enqueue_event(
-            TaskStatusUpdateEvent(
-                taskId=task.id,
-                contextId=task.contextId,
-                status=TaskStatus(
-                    state=task_state,
-                    message=new_agent_text_message(clean_result),
-                ),
-            )
-        )
-
-        # Clean up conversation history if completed
+        # Clean up completed conversations
         if task_state == TaskState.completed:
-            self.agent.cleanup_context(context_id)
+            self.agent.cleanup_context(ctx_id)
 
     @override
     async def cancel(
