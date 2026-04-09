@@ -3,8 +3,17 @@ import uuid
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="IT Incident Helper - A2A Agent")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Config from environment
 API_KEY = os.environ.get("AGENT_API_KEY", "test-key-change-me")
