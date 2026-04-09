@@ -452,7 +452,7 @@ async def call_llm(messages: list[dict]) -> str:
     system = config["system_prompt"]
 
     if not api_key:
-        return f"⚙️ This agent hasn't been configured yet.\n\nPlease set it up at: {SERVICE_URL}/config\n\n[STATUS:completed]"
+        return f"⚙️ This agent hasn't been configured yet.\n\nPlease set it up at: {SERVICE_URL}/config\n\n[STATUS:input-required]"
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         if provider == "anthropic":
