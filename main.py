@@ -596,6 +596,7 @@ async def _process_a2a_request(request: Request):
         "id": rpc_id,
         "result": {
             "id": task_id,
+            "taskId": task_id,
             "contextId": context_id,
             "status": {"state": status},
             "artifacts": [{"parts": [{"type": "text", "text": clean_response}]}],
@@ -615,4 +616,5 @@ async def health():
 
 
 def _error_response(rpc_id, task_id, message, context_id=None):
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": {"id": task_id, "contextId": context_id or str(uuid.uuid4()), "status": {"state": "failed", "message": {"role": "agent", "parts": [{"type": "text", "text": message}]}}}}
+    cid = context_id or str(uuid.uuid4())
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": {"id": task_id, "taskId": task_id, "contextId": cid, "status": {"state": "failed", "message": {"role": "agent", "parts": [{"type": "text", "text": message}]}}}}
