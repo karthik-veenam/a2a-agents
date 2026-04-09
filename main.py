@@ -23,10 +23,14 @@ app.add_middleware(
 config = {
     "agent_api_key": os.environ.get("AGENT_API_KEY", "test-key-change-me"),
     "llm_provider": os.environ.get("LLM_PROVIDER", "anthropic"),
-    "llm_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
     "llm_model": os.environ.get("LLM_MODEL", "claude-sonnet-4-20250514"),
     "agent_name": os.environ.get("AGENT_NAME", "A2A Assistant"),
     "system_prompt": os.environ.get("SYSTEM_PROMPT", "You are a helpful AI assistant. Be concise, accurate, and helpful. Use markdown formatting when it improves readability."),
+    "api_keys": {
+        "anthropic": os.environ.get("ANTHROPIC_API_KEY", ""),
+        "openai": os.environ.get("OPENAI_API_KEY", ""),
+        "google": os.environ.get("GOOGLE_API_KEY", ""),
+    },
 }
 
 SERVICE_URL = os.environ.get("SERVICE_URL", "http://localhost:8080")
@@ -619,8 +623,11 @@ CONFIG_HTML = """
                 </div>
                 <div class="field">
                     <label>API Key</label>
-                    <input type="password" name="llm_api_key" value="{llm_api_key}" placeholder="Enter your LLM API key">
-                    <div class="hint">Stored in memory only — resets on redeploy</div>
+                    <input type="hidden" name="api_key_anthropic" id="api_key_anthropic" value="{api_key_anthropic}">
+                    <input type="hidden" name="api_key_openai" id="api_key_openai" value="{api_key_openai}">
+                    <input type="hidden" name="api_key_google" id="api_key_google" value="{api_key_google}">
+                    <input type="password" id="visible_api_key" placeholder="Enter your LLM API key">
+                    <div class="hint">Keys are stored per provider — switching providers keeps your keys</div>
                 </div>
                 <div class="field">
                     <label>Model</label>
@@ -656,10 +663,14 @@ CONFIG_HTML = """
     <script>
         document.querySelectorAll('.provider-option').forEach(o => {{
             o.addEventListener('click', () => {{
+                // Save current visible key to current provider's hidden field
+                saveVisibleKey();
                 document.querySelectorAll('.provider-option').forEach(x => x.classList.remove('selected'));
                 o.classList.add('selected');
                 o.querySelector('input').checked = true;
-                updateModels(o.querySelector('input').value);
+                const prov = o.querySelector('input').value;
+                updateModels(prov);
+                loadKeyForProvider(prov);
             }});
         }});
 
@@ -670,6 +681,28 @@ CONFIG_HTML = """
         }};
         const currentModel = "{llm_model}";
         const currentProvider = document.querySelector('.provider-option.selected input')?.value || "anthropic";
+        const visibleKey = document.getElementById('visible_api_key');
+
+        function getActiveProvider() {{
+            return document.querySelector('.provider-option.selected input')?.value || "anthropic";
+        }}
+
+        function loadKeyForProvider(prov) {{
+            const hidden = document.getElementById('api_key_' + prov);
+            visibleKey.value = hidden ? hidden.value : '';
+        }}
+
+        function saveVisibleKey() {{
+            const prov = getActiveProvider();
+            const hidden = document.getElementById('api_key_' + prov);
+            if (hidden) hidden.value = visibleKey.value;
+        }}
+
+        // Sync visible key to hidden on every keystroke
+        visibleKey.addEventListener('input', () => {{ saveVisibleKey(); }});
+
+        // Also sync before form submit
+        document.querySelector('form').addEventListener('submit', () => {{ saveVisibleKey(); }});
 
         function updateModels(provider) {{
             const sel = document.getElementById('model-select');
@@ -682,7 +715,10 @@ CONFIG_HTML = """
                 sel.appendChild(opt);
             }});
         }}
+
+        // Initialize
         updateModels(currentProvider);
+        loadKeyForProvider(currentProvider);
         const p = new URLSearchParams(location.search);
         if (p.get('saved')) showToast('Configuration saved!', 'success');
 
@@ -694,12 +730,19 @@ CONFIG_HTML = """
 
         async function testLLM() {{
             const btn = document.querySelector('.btn-test');
-            btn.textContent = 'Testing...';
+            btn.textContent = 'Saving & Testing...';
+
+            // Save config first
+            saveVisibleKey();
+            const form = document.querySelector('form');
+            const formData = new FormData(form);
+
             try {{
+                await fetch('/config', {{ method: 'POST', body: formData }});
                 const r = await fetch('/test-llm');
                 const d = await r.json();
                 showToast(d.success ? 'Connected! ' + d.response.substring(0, 60) : 'Failed: ' + d.error, d.success ? 'success' : 'error');
-            }} catch(e) {{ showToast('Error', 'error'); }}
+            }} catch(e) {{ showToast('Connection error: ' + e.message, 'error'); }}
             btn.textContent = 'Test LLM Connection';
         }}
     </script>
@@ -722,7 +765,7 @@ async def console_page(request: Request):
         # But this is GET, so show a simple JSON
         return HTMLResponse(content="")
 
-    is_configured = bool(config["llm_api_key"])
+    is_configured = bool(config["api_keys"].get(config["llm_provider"], ""))
     provider_name = PROVIDERS.get(config["llm_provider"], {}).get("name", config["llm_provider"])
 
     if is_configured:
@@ -750,11 +793,14 @@ async def console_page(request: Request):
 
 @app.get("/config", response_class=HTMLResponse)
 async def config_page():
-    is_configured = bool(config["llm_api_key"])
+    current_key = config["api_keys"].get(config["llm_provider"], "")
+    is_configured = bool(current_key)
     html = CONFIG_HTML.format(
         llm_dot="green" if is_configured else "red",
         llm_status="Connected" if is_configured else "Not configured",
-        llm_api_key=config["llm_api_key"],
+        api_key_anthropic=config["api_keys"].get("anthropic", ""),
+        api_key_openai=config["api_keys"].get("openai", ""),
+        api_key_google=config["api_keys"].get("google", ""),
         llm_model=config["llm_model"],
         agent_name=config["agent_name"],
         agent_api_key=config["agent_api_key"],
@@ -772,18 +818,22 @@ async def config_page():
 @app.post("/config")
 async def save_config(
     llm_provider: str = Form(...),
-    llm_api_key: str = Form(""),
     llm_model: str = Form(""),
     agent_name: str = Form("A2A Assistant"),
     agent_api_key: str = Form("test-key-change-me"),
     system_prompt: str = Form(""),
+    api_key_anthropic: str = Form(""),
+    api_key_openai: str = Form(""),
+    api_key_google: str = Form(""),
 ):
     config["llm_provider"] = llm_provider
-    config["llm_api_key"] = llm_api_key
     config["llm_model"] = llm_model or PROVIDERS.get(llm_provider, {}).get("models", [""])[0]
     config["agent_name"] = agent_name
     config["agent_api_key"] = agent_api_key
     config["system_prompt"] = system_prompt
+    config["api_keys"]["anthropic"] = api_key_anthropic
+    config["api_keys"]["openai"] = api_key_openai
+    config["api_keys"]["google"] = api_key_google
     return RedirectResponse(url="/config?saved=1", status_code=303)
 
 
@@ -807,7 +857,7 @@ async def test_llm():
 
 async def call_llm(user_message: str) -> str:
     provider = config["llm_provider"]
-    api_key = config["llm_api_key"]
+    api_key = config["api_keys"].get(provider, "")
     model = config["llm_model"]
     system = config["system_prompt"]
 
@@ -1015,7 +1065,7 @@ async def health():
         "status": "healthy",
         "agent": config["agent_name"],
         "provider": config["llm_provider"],
-        "llm_configured": bool(config["llm_api_key"]),
+        "llm_configured": bool(config["api_keys"].get(config["llm_provider"], "")),
     }
 
 
