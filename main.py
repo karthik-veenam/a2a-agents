@@ -158,36 +158,64 @@ async def ask_claude(user_message: str) -> str:
 # ─── A2A Task Handler ───
 @app.post("/tasks/send")
 async def handle_task(request: Request):
+    return await _process_a2a_request(request)
+
+
+# ─── Alternative A2A endpoint (used by ServiceNow Agent Studio) ───
+@app.post("/message/send")
+async def handle_message(request: Request):
+    return await _process_a2a_request(request)
+
+
+async def _process_a2a_request(request: Request):
     try:
         body = await request.json()
     except Exception:
         return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
 
-    if body.get("jsonrpc") != "2.0" or body.get("method") != "tasks/send":
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Invalid JSON-RPC request"}
-        )
+    print(f"[DEBUG] Request body: {body}")
 
-    params = body.get("params", {})
-    task_id = params.get("id", str(uuid.uuid4()))
-    message = params.get("message", {})
-    parts = message.get("parts", [])
-
+    # Extract message text - handle multiple payload formats
     user_text = ""
-    for part in parts:
-        if part.get("type") == "text":
-            user_text += part.get("text", "")
+    task_id = str(uuid.uuid4())
+    rpc_id = body.get("id", "1")
+
+    # Format 1: Standard A2A JSON-RPC
+    if body.get("params"):
+        params = body["params"]
+        task_id = params.get("id", task_id)
+        message = params.get("message", {})
+        parts = message.get("parts", [])
+        for part in parts:
+            if part.get("type") == "text":
+                user_text += part.get("text", "")
+
+    # Format 2: Direct message format
+    elif body.get("message"):
+        message = body["message"]
+        if isinstance(message, str):
+            user_text = message
+        elif isinstance(message, dict):
+            parts = message.get("parts", [])
+            for part in parts:
+                if part.get("type") == "text":
+                    user_text += part.get("text", "")
+            if not user_text:
+                user_text = message.get("text", "")
+
+    # Format 3: Simple text field
+    elif body.get("text"):
+        user_text = body["text"]
 
     if not user_text:
-        return _error_response(body.get("id"), task_id, "No text content in message")
+        return _error_response(rpc_id, task_id, "No text content in message")
 
     # Call Claude for AI-powered triage
     agent_response = await ask_claude(user_text)
 
     return {
         "jsonrpc": "2.0",
-        "id": body.get("id"),
+        "id": rpc_id,
         "result": {
             "id": task_id,
             "status": {"state": "completed"},
@@ -207,6 +235,20 @@ async def health():
         "status": "healthy",
         "llm_configured": bool(ANTHROPIC_API_KEY)
     }
+
+
+# ─── Catch-all for debugging unknown paths ───
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "OPTIONS"])
+async def catch_all(request: Request, path: str):
+    print(f"[DEBUG CATCH-ALL] Path: /{path}")
+    print(f"[DEBUG CATCH-ALL] Method: {request.method}")
+    print(f"[DEBUG CATCH-ALL] Headers: {dict(request.headers)}")
+    try:
+        body = await request.json()
+        print(f"[DEBUG CATCH-ALL] Body: {body}")
+    except:
+        pass
+    return JSONResponse(status_code=404, content={"detail": f"No route for /{path}"})
 
 
 def _error_response(rpc_id, task_id, message):
