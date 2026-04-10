@@ -18,7 +18,7 @@ PORT = int(os.environ.get("PORT", "9999"))
 PROVIDERS = {
     "anthropic": {"name": "Anthropic (Claude)", "models": ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]},
     "openai": {"name": "OpenAI (GPT)", "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]},
-    "google": {"name": "Google (Gemini)", "models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"]},
+    "google": {"name": "Google (Gemini)", "models": ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"]},
 }
 
 
@@ -167,7 +167,7 @@ CONFIG_HTML = """<!DOCTYPE html>
 </div></div>
 <div id="toast" class="toast"></div>
 <script>
-const models={anthropic:["claude-sonnet-4-20250514","claude-haiku-4-5-20251001"],openai:["gpt-4o","gpt-4o-mini","gpt-4-turbo"],google:["gemini-2.5-flash","gemini-2.0-flash","gemini-2.5-pro"]};
+const models={anthropic:["claude-sonnet-4-20250514","claude-haiku-4-5-20251001"],openai:["gpt-4o","gpt-4o-mini","gpt-4-turbo"],google:["gemini-2.0-flash","gemini-2.5-flash","gemini-2.5-pro"]};
 let currentEmail='';
 
 document.querySelectorAll('.po').forEach(o=>{o.addEventListener('click',()=>{svk();document.querySelectorAll('.po').forEach(x=>x.classList.remove('s'));o.classList.add('s');o.querySelector('input').checked=true;um(o.dataset.p);ldk(o.dataset.p)})});

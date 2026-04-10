@@ -170,10 +170,12 @@ class LLMAgentExecutor(AgentExecutor):
         print(f"[DEBUG] Parsed state: {state}")
 
         await updater.add_artifact([TextPart(text=clean)], name="response")
-        await updater.update_status(state, message=updater.new_agent_message(parts=[TextPart(text=clean)]))
-
+        msg = updater.new_agent_message(parts=[TextPart(text=clean)])
         if state == TaskState.completed:
+            await updater.complete(message=msg)
             self.agent.cleanup(email, ctx_id)
+        else:
+            await updater.requires_input(message=msg, final=True)
 
     @override
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
