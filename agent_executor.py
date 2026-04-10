@@ -14,31 +14,39 @@ from a2a.types import TaskState, TextPart
 
 STATUS_INSTRUCTION = """
 
-IMPORTANT — Status signaling:
+CRITICAL — Status signaling rules:
 At the very end of EVERY response, you MUST include exactly one of these tags on its own line:
-[STATUS:completed] — Use when you have fully answered the user's request and no further input is needed.
-[STATUS:input-required] — Use when you need more information, clarification, or are asking the user a follow-up question.
+[STATUS:completed] — ONLY when the user's task is 100% done and there is absolutely nothing more to discuss.
+[STATUS:input-required] — For ALL other cases. This is the DEFAULT. When in doubt, use this.
 
-When to use [STATUS:input-required]:
-- User says "hi", "hello", or a greeting — ask how you can help
-- You need clarification
-- You're offering choices
-- The task is multi-step and you need more info
+USE [STATUS:input-required] for:
+- ANY greeting: "hi", "hello", "hey" — respond with "How can I help you?" + input-required
+- ANY first message in a conversation — always input-required
+- After answering a question — ask "Anything else?" + input-required
+- When you need clarification
+- When offering choices or suggestions
+- When the conversation could naturally continue
 
-When to use [STATUS:completed]:
-- You've fully answered a question
-- You've written the requested code/content
-- There's nothing left to ask
+USE [STATUS:completed] ONLY when:
+- The user explicitly says "thanks", "that's all", "bye", "done"
+- You've completed a very specific one-shot task AND the user has confirmed they're satisfied
+- The user says they don't need anything else
 
+DEFAULT TO [STATUS:input-required]. Only use completed when the user clearly signals they're done.
 The status tag MUST be the very last line. Never skip it."""
 
 
 def parse_status(text: str) -> tuple[str, TaskState]:
-    match = re.search(r'\[STATUS:(completed|input-required)\]\s*$', text)
+    # Try strict match first
+    match = re.search(r'\[STATUS:(completed|input-required)\]', text, re.IGNORECASE)
     if match:
         clean = text[:match.start()].rstrip()
-        return (clean, TaskState.completed) if match.group(1) == "completed" else (clean, TaskState.input_required)
-    return text, TaskState.completed
+        # Remove any trailing content after the tag too
+        return (clean, TaskState.completed) if "completed" in match.group(1).lower() else (clean, TaskState.input_required)
+    
+    # No tag found — default to input-required (safer, keeps conversation open)
+    print(f"[DEBUG] No STATUS tag found in response, defaulting to input-required. Last 100 chars: {text[-100:]}")
+    return text, TaskState.input_required
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -172,7 +180,9 @@ class LLMAgentExecutor(AgentExecutor):
         ctx_id = context.context_id or context.task_id
 
         raw = await self.agent.invoke(user_text, email, ctx_id)
+        print(f"[DEBUG] Raw LLM response (last 150 chars): ...{raw[-150:]}")
         clean, state = parse_status(raw)
+        print(f"[DEBUG] Parsed state: {state}")
 
         await updater.add_artifact([TextPart(text=clean)], name="response")
         await updater.update_status(state, message=updater.new_agent_message(parts=[TextPart(text=clean)]))
