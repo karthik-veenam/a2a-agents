@@ -14,26 +14,11 @@ from a2a.types import TaskState, TextPart
 
 STATUS_INSTRUCTION = """
 
-CRITICAL — Status signaling rules:
-At the very end of EVERY response, you MUST include exactly one of these tags on its own line:
-[STATUS:completed] — ONLY when the user's task is 100% done and there is absolutely nothing more to discuss.
-[STATUS:input-required] — For ALL other cases. This is the DEFAULT. When in doubt, use this.
+SYSTEM REQUIREMENT — you MUST end every response with exactly one of these tags on its own line:
+[STATUS:input-required]   ← USE THIS BY DEFAULT for every response
+[STATUS:completed]         ← ONLY if the user explicitly says "bye", "goodbye", "thanks that's all", "done", or "no more questions"
 
-USE [STATUS:input-required] for:
-- ANY greeting: "hi", "hello", "hey" — respond with "How can I help you?" + input-required
-- ANY first message in a conversation — always input-required
-- After answering a question — ask "Anything else?" + input-required
-- When you need clarification
-- When offering choices or suggestions
-- When the conversation could naturally continue
-
-USE [STATUS:completed] ONLY when:
-- The user explicitly says "thanks", "that's all", "bye", "done"
-- You've completed a very specific one-shot task AND the user has confirmed they're satisfied
-- The user says they don't need anything else
-
-DEFAULT TO [STATUS:input-required]. Only use completed when the user clearly signals they're done.
-The status tag MUST be the very last line. Never skip it."""
+The default is ALWAYS [STATUS:input-required]. Never skip the tag. It must be the very last line."""
 
 
 def parse_status(text: str) -> tuple[str, TaskState]:
@@ -108,7 +93,7 @@ class LLMAgent:
             elif provider == "google":
                 result = await self._google(client, api_key, model, system, messages)
             else:
-                result = "Unknown provider.\n\n[STATUS:completed]"
+                result = "Unknown provider.\n\n[STATUS:input-required]"
 
         clean, _ = parse_status(result)
         self.conversations[conv_key].append({"role": "assistant", "content": clean})
@@ -126,14 +111,14 @@ class LLMAgent:
         r = await client.post("https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
             json={"model": model, "max_tokens": 4096, "system": system, "messages": msgs})
-        if r.status_code != 200: return f"Anthropic error: {r.status_code}\n\n[STATUS:completed]"
+        if r.status_code != 200: return f"Anthropic error: {r.status_code}\n\n[STATUS:input-required]"
         return "".join(b["text"] for b in r.json().get("content", []) if b.get("type") == "text")
 
     async def _openai(self, client, key, model, system, msgs):
         r = await client.post("https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"model": model, "max_tokens": 4096, "messages": [{"role": "system", "content": system}] + msgs})
-        if r.status_code != 200: return f"OpenAI error: {r.status_code}\n\n[STATUS:completed]"
+        if r.status_code != 200: return f"OpenAI error: {r.status_code}\n\n[STATUS:input-required]"
         return r.json()["choices"][0]["message"]["content"]
 
     async def _google(self, client, key, model, system, msgs):
@@ -141,7 +126,7 @@ class LLMAgent:
         r = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={"Content-Type": "application/json", "x-goog-api-key": key},
             json={"system_instruction": {"parts": [{"text": system}]}, "contents": contents})
-        if r.status_code != 200: return f"Google error: {r.status_code}\n\n[STATUS:completed]"
+        if r.status_code != 200: return f"Google error: {r.status_code}\n\n[STATUS:input-required]"
         return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
