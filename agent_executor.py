@@ -5,7 +5,7 @@ from typing_extensions import override
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
-from a2a.types import TaskState, TextPart
+from a2a.types import Part, TaskState, TextPart
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -169,8 +169,9 @@ class LLMAgentExecutor(AgentExecutor):
         clean, state = parse_status(raw)
         print(f"[DEBUG] Parsed state: {state}")
 
-        await updater.add_artifact([TextPart(text=clean)], name="response")
-        msg = updater.new_agent_message(parts=[TextPart(text=clean)])
+        part = Part(root=TextPart(text=clean))
+        await updater.add_artifact([part], name="response")
+        msg = updater.new_agent_message(parts=[part])
         if state == TaskState.completed:
             await updater.complete(message=msg)
             self.agent.cleanup(email, ctx_id)
