@@ -141,8 +141,6 @@ class GoogleOAuthMiddleware:
         finally:
             ae._user_email_var.reset(ctx_token)
 
-app = GoogleOAuthMiddleware(app)
-
 
 # ═══════════════════════════════════════════════════════════════
 # HTML TEMPLATES
@@ -329,7 +327,7 @@ async def users_handler(request):
     return JSONResponse({"users": users})
 
 
-# Mount routes
+# Mount routes (must happen before wrapping with GoogleOAuthMiddleware)
 app.routes.insert(0, Route("/console", console_handler, methods=["GET"]))
 app.routes.insert(0, Route("/config", config_page_handler, methods=["GET"]))
 app.routes.insert(0, Route("/api/config/load", config_load_handler, methods=["GET"]))
@@ -337,6 +335,7 @@ app.routes.insert(0, Route("/api/config", config_save_handler, methods=["POST"])
 app.routes.insert(0, Route("/playground", playground_handler, methods=["GET"]))
 app.routes.insert(0, Route("/api/users", users_handler, methods=["GET"]))
 
+app = GoogleOAuthMiddleware(app)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
