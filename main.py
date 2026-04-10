@@ -92,43 +92,56 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 # AUTH MIDDLEWARE — validates Google OAuth on A2A endpoints
 # ═══════════════════════════════════════════════════════════════
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+class GoogleOAuthMiddleware:
+    """Pure ASGI middleware — sets a ContextVar per request so concurrent
+    requests never bleed one user's email into another's executor call."""
 
-class GoogleOAuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {"/.well-known/agent.json", "/console", "/config", "/playground", "/health",
                     "/api/config", "/api/config/load"}
 
-    async def dispatch(self, request: Request, call_next):
-        # OPTIONS for CORS
-        if request.method == "OPTIONS":
-            return await call_next(request)
+    def __init__(self, app):
+        self.app = app
 
-        # Public paths — no auth
-        if request.url.path in self.PUBLIC_PATHS:
-            return await call_next(request)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        # GET on root = console page
-        if request.url.path == "/" and request.method == "GET":
-            return await call_next(request)
+        path = scope.get("path", "")
+        method = scope.get("method", "GET")
 
-        # A2A endpoints need Bearer token
-        auth = request.headers.get("authorization", "")
+        # OPTIONS for CORS preflight
+        if method == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        # Public paths and GET /
+        if path in self.PUBLIC_PATHS or (path == "/" and method == "GET"):
+            await self.app(scope, receive, send)
+            return
+
+        # Extract Bearer token from headers (ASGI headers are bytes tuples)
+        headers = {k: v for k, v in scope.get("headers", [])}
+        auth = headers.get(b"authorization", b"").decode()
+
         if not auth.startswith("Bearer "):
-            return JSONResponse(status_code=401, content={"error": "Missing Bearer token. Authenticate with Google OAuth."})
+            await JSONResponse(status_code=401, content={"error": "Missing Bearer token. Authenticate with Google OAuth."})(scope, receive, send)
+            return
 
-        token = auth.replace("Bearer ", "")
+        token = auth[len("Bearer "):]
         user = await validate_google_token(token)
         if not user:
-            return JSONResponse(status_code=401, content={"error": "Invalid Google OAuth token."})
+            await JSONResponse(status_code=401, content={"error": "Invalid Google OAuth token."})(scope, receive, send)
+            return
 
-        # Set current user email for the executor
-        ae._current_user_email = user["email"]
+        # Set per-request context var — safe under concurrent async requests
+        ctx_token = ae._user_email_var.set(user["email"])
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            ae._user_email_var.reset(ctx_token)
 
-        response = await call_next(request)
-        return response
-
-app.add_middleware(GoogleOAuthMiddleware)
+app = GoogleOAuthMiddleware(app)
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 import os
 import re
 import httpx
+from contextvars import ContextVar
 from typing_extensions import override
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -134,8 +135,8 @@ class LLMAgent:
 # A2A EXECUTOR
 # ═══════════════════════════════════════════════════════════════
 
-# This gets set by main.py's middleware after token validation
-_current_user_email = ""
+# Per-request context var — safe under concurrent async requests
+_user_email_var: ContextVar[str] = ContextVar('user_email', default='default')
 
 
 class LLMAgentExecutor(AgentExecutor):
@@ -161,7 +162,7 @@ class LLMAgentExecutor(AgentExecutor):
             user_text = "Hello"
 
         # Use the authenticated user's email for config lookup
-        email = _current_user_email or "default"
+        email = _user_email_var.get()
         ctx_id = context.context_id or context.task_id
 
         raw = await self.agent.invoke(user_text, email, ctx_id)
