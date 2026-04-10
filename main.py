@@ -5,7 +5,7 @@ import uvicorn
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill, AgentAuthentication
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from starlette.routing import Route
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -68,7 +68,6 @@ agent_card = AgentCard(
     defaultOutputModes=["text"],
     capabilities=AgentCapabilities(streaming=False),
     skills=[skill],
-    authentication=AgentAuthentication(schemes=["bearer"]),
 )
 
 executor = LLMAgentExecutor()
